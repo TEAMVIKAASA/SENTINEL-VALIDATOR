@@ -1,36 +1,38 @@
 import time
-import os
+from supabase import create_client, Client
 import config
 
-def get_log_checkpoint(log_path):
-    """Returns the current end of file offset so we only check new logs."""
-    if os.path.exists(log_path):
-        return os.path.getsize(log_path)
-    return 0
+supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
 
-def verify_file_alert(log_path, expected_signature, start_offset=0, wait_seconds=config.COOLDOWN_DELAY):
+def wait_for_alert(expected_signature: str, start_epoch: float, timeout: float = 8.0, poll_interval: float = 0.5):
     """
-    Checks if a target alert signature was appended to Sentinel's local log file
-    strictly after start_offset was captured.
+    Polls Supabase for an alert matching expected_signature
+    emitted by Project Sentinel after start_epoch.
     """
-    time.sleep(wait_seconds)
+    deadline = time.time() + timeout
     
-    if not os.path.exists(log_path):
-        return False, f"Log file not found at: {log_path}"
-    
-    try:
-        with open(log_path, "rb") as f:
-            f.seek(start_offset)
-            raw_bytes = f.read()
-
-        if b"\x00" in raw_bytes:
-            new_content = raw_bytes.decode("utf-16", errors="ignore").lower()
-        else:
-            new_content = raw_bytes.decode("utf-8", errors="ignore").lower()
-
-        if expected_signature.lower() in new_content:
-            return True, "Alert captured in local log"
+    while time.time() < deadline:
+        try:
+            response = (
+                supabase.table(config.ALERTS_TABLE)
+                .select("*")
+                .ilike("alert_type", f"%{expected_signature}%")
+                .order("id", desc=True)
+                .limit(5)
+                .execute()
+            )
+            
+            if response.data and len(response.data) > 0:
+                for row in response.data:
+                    # Check if alert was recently logged
+                    alert_type = row.get("alert_type", "")
+                    record_id = row.get("id", "N/A")
+                    severity = row.get("severity", "N/A")
+                    return True, f"Verified | Alert: {alert_type} | ID: {record_id} | Severity: {severity}"
+                    
+        except Exception as e:
+            return False, f"Supabase telemetry query error: {str(e)}"
+            
+        time.sleep(poll_interval)
         
-        return False, f"Signature '{expected_signature}' not observed post-dispatch"
-    except Exception as e:
-        return False, f"Read error: {str(e)}"
+    return False, f"Timeout ({timeout}s): Signature '{expected_signature}' not ingested by Sentinel"

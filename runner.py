@@ -1,12 +1,9 @@
 import time
 import json
-from datetime import datetime
+import uuid
 from tabulate import tabulate
 import scenarios
 import verifier
-import config
-
-LOG_FILE_PATH = "alerts.log" 
 
 TEST_SUITE = [
     {
@@ -14,73 +11,72 @@ TEST_SUITE = [
         "name": "TCP Xmas Scan Attack",
         "func": scenarios.trigger_xmas_scan,
         "signature": "XMAS",
+        "timeout": 8.0
     },
     {
         "id": "TC-02",
         "name": "Oversized ICMP Ping Request",
         "func": scenarios.trigger_oversized_icmp,
         "signature": "ICMP",
+        "timeout": 8.0
     },
     {
         "id": "TC-03",
         "name": "TCP SYN Burst Simulation",
         "func": scenarios.trigger_syn_burst,
         "signature": "SYN",
+        "timeout": 8.0
     }
 ]
 
-def run_suite():
-    print("\n" + "=" * 55)
-    print("      PROJECT SENTINEL - ADVERSARIAL VALIDATION SUITE      ")
-    print("=" * 55 + "\n")
+def run_test_suite():
+    session_id = f"sentinel_{uuid.uuid4().hex[:8]}"
+    print("\n" + "=" * 70)
+    print(f"   PROJECT SENTINEL - ADVERSARIAL VALIDATION SUITE [{session_id}]")
+    print("=" * 70 + "\n")
     
-    results = []
-    report_data = {
-        "timestamp": datetime.now().isoformat(),
-        "total_tests": len(TEST_SUITE),
-        "passed": 0,
-        "failed": 0,
-        "details": []
-    }
-
+    table_rows = []
+    json_results = []
+    
     for test in TEST_SUITE:
-        print(f"[*] Running: {test['name']}...")
+        print(f"[*] Executing Test Vector: {test['name']}...")
         start_time = time.time()
         
-        start_offset = verifier.get_log_checkpoint(LOG_FILE_PATH)
+        # 1. Dispatch crafted adversarial packet(s)
+        test["func"]()
         
-        try:
-            test["func"]()
-        except Exception as e:
-            results.append([test["id"], test["name"], "ERROR", f"Dispatch failed: {e}"])
-            report_data["failed"] += 1
-            continue
-
-        passed, detail = verifier.verify_file_alert(LOG_FILE_PATH, test["signature"], start_offset)
-        duration = round((time.time() - start_time), 2)
+        # 2. Poll Supabase for detection ingestion
+        passed, details = verifier.wait_for_alert(
+            expected_signature=test["signature"],
+            start_epoch=start_time,
+            timeout=test["timeout"]
+        )
         
-        status = "PASS" if passed else "FAIL"
-        if passed:
-            report_data["passed"] += 1
-        else:
-            report_data["failed"] += 1
-
-        results.append([test["id"], test["name"], status, f"{duration}s | {detail}"])
-        report_data["details"].append({
-            "id": test["id"],
+        latency = round(time.time() - start_time, 2)
+        verdict = "PASS" if passed else "FAIL"
+        
+        table_rows.append([test["id"], test["name"], verdict, f"{latency}s | {details}"])
+        json_results.append({
+            "test_id": test["id"],
             "name": test["name"],
-            "status": status,
-            "latency_seconds": duration,
-            "telemetry": detail
+            "verdict": verdict,
+            "latency_seconds": latency,
+            "telemetry_details": details
         })
-
-    # Summary table print karo
-    print("\n" + tabulate(results, headers=["ID", "Test Case", "Verdict", "Telemetry / Latency"], tablefmt="fancy_grid"))
-
-    # Report file save karo
-    with open("validation_report.json", "w", encoding="utf-8") as f:
-        json.dump(report_data, f, indent=4)
-    print("\n[+] Validation report saved to validation_report.json")
+        print(f"    --> Verdict: {verdict} ({latency}s)\n")
+        time.sleep(1.0)
+        
+    print(tabulate(table_rows, headers=["ID", "Test Case", "Verdict", "Telemetry / Latency"], tablefmt="fancy_grid"))
+    
+    # Save validation artifact
+    with open("validation_report.json", "w") as f:
+        json.dump({
+            "session_id": session_id,
+            "timestamp": time.time(),
+            "results": json_results
+        }, f, indent=4)
+        
+    print("\n[+] Validation report successfully generated -> validation_report.json\n")
 
 if __name__ == "__main__":
-    run_suite()
+    run_test_suite()

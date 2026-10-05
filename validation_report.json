@@ -1,0 +1,27 @@
+{
+    "session_id": "sentinel_1629ee61",
+    "timestamp": 1791222629.6929855,
+    "results": [
+        {
+            "test_id": "TC-01",
+            "name": "TCP Xmas Scan Attack",
+            "verdict": "PASS",
+            "latency_seconds": 2.13,
+            "telemetry_details": "Verified | Alert: TCP Xmas Scan Detected | ID: 2 | Severity: High"
+        },
+        {
+            "test_id": "TC-02",
+            "name": "Oversized ICMP Ping Request",
+            "verdict": "PASS",
+            "latency_seconds": 0.38,
+            "telemetry_details": "Verified | Alert: Oversized ICMP Ping Detected | ID: 3 | Severity: Medium"
+        },
+        {
+            "test_id": "TC-03",
+            "name": "TCP SYN Burst Simulation",
+            "verdict": "PASS",
+            "latency_seconds": 0.96,
+            "telemetry_details": "Verified | Alert: TCP SYN Burst Detected | ID: 4 | Severity: Critical"
+        }
+    ]
+}
